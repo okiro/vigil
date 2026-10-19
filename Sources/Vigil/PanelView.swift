@@ -41,12 +41,13 @@ struct PanelView: View {
 
 private struct StatusHeader: View {
     @EnvironmentObject private var model: VigilModel
+    @State private var onScreen = false
 
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(tint.opacity(model.isActive ? 0.18 : 0.10))
-                if model.isActive { PulseRing(color: tint) }
+                if model.isActive && onScreen { PulseRing(color: tint) }
                 Image(systemName: model.menuIcon)
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(tint)
@@ -61,6 +62,7 @@ private struct StatusHeader: View {
             }
             Spacer(minLength: 0)
         }
+        .background(WindowVisibility(isVisible: $onScreen))
     }
 
     private var tint: Color { model.isActive ? .green : .secondary }
@@ -102,6 +104,49 @@ private struct PulseRing: View {
             .onAppear {
                 withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { animate = true }
             }
+    }
+}
+
+/// Whether the panel's window is on screen. MenuBarExtra only hides the window on
+/// close, so the view tree stays alive and a running animation would keep rendering
+/// (~13% CPU) for as long as an agent works.
+private struct WindowVisibility: NSViewRepresentable {
+    @Binding var isVisible: Bool
+
+    func makeNSView(context: Context) -> NSView { Probe(isVisible: $isVisible) }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class Probe: NSView {
+        private let isVisible: Binding<Bool>
+        private var observer: NSObjectProtocol?
+
+        init(isVisible: Binding<Bool>) {
+            self.isVisible = isVisible
+            super.init(frame: .zero)
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = window.map {
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.didChangeOcclusionStateNotification, object: $0, queue: .main
+                ) { [weak self] _ in self?.report() }
+            }
+            report()
+        }
+
+        private func report() {
+            let visible = window?.occlusionState.contains(.visible) ?? false
+            // Deferred: this can run mid view-update, where writing state is not allowed.
+            DispatchQueue.main.async { [isVisible] in
+                if isVisible.wrappedValue != visible { isVisible.wrappedValue = visible }
+            }
+        }
     }
 }
 
