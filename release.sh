@@ -88,8 +88,11 @@ cat > build/appcast.xml <<XML
 </rss>
 XML
 
+# The same DMG under a fixed name, so the README can link releases/latest/download/Vigil.dmg.
+cp "$DMG" build/Vigil.dmg
+
 # Tags HEAD, so the release fails unless the built commit is pushed.
-PUBLISH_CMD=(gh release create "v$VERSION" "$DMG" build/appcast.xml --repo "${REPO_URL#https://github.com/}"
+PUBLISH_CMD=(gh release create "v$VERSION" "$DMG" build/Vigil.dmg build/appcast.xml --repo "${REPO_URL#https://github.com/}"
     --target "$(git rev-parse HEAD)" --title "Vigil $VERSION" --generate-notes)
 
 echo
