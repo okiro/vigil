@@ -12,26 +12,46 @@ rm -rf /Applications/Vigil.app && cp -R build/Vigil.app /Applications/ && open /
 On first launch, click **Install Claude Code Hooks**. Already-open Claude Code sessions pick up hooks on restart.
 Install from `/Applications` first — hooks point at the app's path. If you move it, reinstall hooks from the menu.
 
-## Share (signed DMG)
+## Releases & auto-update
 
-`./release.sh` builds a universal app, signs it with your Developer ID, packs `build/Vigil-<version>.dmg`, notarizes and staples it. The version lives in `build.sh` (`VERSION=`).
-One-time setup — create an app-specific password at appleid.apple.com, then:
+Every push to `main` that changes the app ships a new version: [the Release workflow](.github/workflows/release.yml) builds a universal app, signs it with the Developer ID, notarizes `Vigil-<version>.dmg`, and publishes it as GitHub release `v<version>` with a Sparkle `appcast.xml`. Pushes that only touch Markdown don't release.
+
+The version comes from the commit messages since the last `v*` tag ([Conventional Commits](https://www.conventionalcommits.org)):
+
+| Commit | Bump | Example |
+|---|---|---|
+| `feat!: …`, or a `BREAKING CHANGE:` line in the body | major | 0.4.2 → 1.0.0 |
+| `feat: …` / `feat(scope): …` | minor | 0.4.2 → 0.5.0 |
+| anything else (`fix: …`, `chore: …`, no prefix) | patch | 0.4.2 → 0.4.3 |
+
+Installed copies check [okiro/vigil](https://github.com/okiro/vigil/releases)'s latest release once a day ([Sparkle](https://sparkle-project.org); `FEED_URL` in `build.sh`, the repo must be public), download updates in the background, and install them as soon as Vigil isn't keeping the Mac awake — the relaunch takes a second, and dropping the power assertion mid-run could let an idle Mac sleep. In **Always** mode that means at the next quit. The ⋯ menu has **Check for Updates…** and **Update Automatically**.
+
+### One-time CI setup
+
+The workflow needs five repository secrets (`gh secret set NAME` prompts for the value, keeping it out of shell history):
+
+```bash
+# Sparkle key: export it, keep the file in your password manager (it's also your backup), then upload
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key
+gh secret set SPARKLE_PRIVATE_KEY < sparkle-private-key && rm sparkle-private-key
+
+# Developer ID: Keychain Access → My Certificates → "Developer ID Application: …" → Export… as developer-id.p12
+base64 -i developer-id.p12 | gh secret set DEVELOPER_ID_P12 && rm developer-id.p12
+gh secret set DEVELOPER_ID_P12_PASSWORD    # the password you chose when exporting
+
+# Notarization: an app-specific password from appleid.apple.com
+gh secret set APPLE_ID
+gh secret set APPLE_APP_PASSWORD
+```
+
+Installed copies only accept updates signed with that Sparkle key (public half: `SPARKLE_PUBLIC_KEY` in `build.sh`). Lose it and everyone has to reinstall by hand. `generate_keys -f sparkle-private-key` imports it on another Mac.
+
+### Releasing from this Mac
+
+`./release.sh` builds the next version's notarized DMG and appcast locally; `--publish` also creates the GitHub release (CI normally does this). It uses the keychain: the Sparkle key, the Developer ID, and a notarization profile stored once with:
 
 ```bash
 xcrun notarytool store-credentials vigil-notary --apple-id <your Apple ID> --team-id W898QUYB63
-```
-
-## Auto-update
-
-[Sparkle](https://sparkle-project.org) checks once a day for `appcast.xml` on the latest release of [okiro/vigil](https://github.com/okiro/vigil/releases) (`FEED_URL` in `build.sh`; the repo must be public). An update found in the background shows up as a banner in the panel; one found right after launch opens Sparkle's window. The ⋯ menu has **Check for Updates…** and **Check Automatically**.
-
-To ship one: bump `VERSION` in `build.sh`, commit and push, then `./release.sh --publish`. It builds the notarized DMG, writes `build/appcast.xml` signed with the Sparkle key, and creates GitHub release `v<version>` with both attached.
-
-The Sparkle signing key (EdDSA) lives in the login keychain; its public half is `SPARKLE_PUBLIC_KEY` in `build.sh`. Installed copies only accept updates signed with it, so back it up:
-
-```bash
-.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key   # export; store somewhere safe, then delete the file
-.build/artifacts/sparkle/Sparkle/bin/generate_keys -f sparkle-private-key   # import on another Mac
 ```
 
 ## How it detects "AI is working"

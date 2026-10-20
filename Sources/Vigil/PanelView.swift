@@ -408,7 +408,7 @@ private struct Footer: View {
                 Button("Show Sessions Folder") { model.openSessionsFolder() }
                 Divider()
                 Button("Check for Updates…") { updater.checkForUpdates() }
-                Toggle("Check Automatically", isOn: $updater.automaticallyChecks)
+                Toggle("Update Automatically", isOn: $updater.updatesAutomatically)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }

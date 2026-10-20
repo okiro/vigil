@@ -48,6 +48,8 @@ final class VigilModel: NSObject, ObservableObject {
         didSet { defaults.set(patterns, forKey: Key.patterns); tick() }
     }
 
+    let updater = Updater()
+
     private let defaults = UserDefaults.standard
     private let sleepGuard = SleepGuard()
     private var timer: Timer?
@@ -116,6 +118,7 @@ final class VigilModel: NSObject, ObservableObject {
             awakeSince = active ? Date() : nil
         }
         sleepGuard.update(active: active, display: keepDisplayAwake)
+        if !active { updater.installDownloadedUpdate() }
     }
 
     func refreshStatus() {

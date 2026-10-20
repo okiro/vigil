@@ -4,7 +4,9 @@
 #   ./build.sh --release  universal (arm64 + x86_64), Developer ID signed with hardened runtime
 set -euo pipefail
 
-VERSION="0.3"
+# release.sh passes the version it's releasing; other builds take the latest release tag.
+LAST_TAG=$(git -C "$(dirname "$0")" describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)
+VERSION="${VERSION:-${LAST_TAG#v}}"
 # Sparkle checks the appcast attached to the latest release of this (public) repo.
 FEED_URL="https://github.com/okiro/vigil/releases/latest/download/appcast.xml"
 # Public half of the EdDSA key in the login keychain (generate_keys); release.sh signs with the private half.
@@ -56,6 +58,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>SUFeedURL</key><string>$FEED_URL</string>
     <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
     <key>SUEnableAutomaticChecks</key><true/>
+    <key>SUAutomaticallyUpdate</key><true/>
 </dict>
 </plist>
 PLIST
