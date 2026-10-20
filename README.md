@@ -21,6 +21,19 @@ One-time setup — create an app-specific password at appleid.apple.com, then:
 xcrun notarytool store-credentials vigil-notary --apple-id <your Apple ID> --team-id W898QUYB63
 ```
 
+## Auto-update
+
+[Sparkle](https://sparkle-project.org) checks once a day for `appcast.xml` on the latest release of [okiro/vigil](https://github.com/okiro/vigil/releases) (`FEED_URL` in `build.sh`; the repo must be public). An update found in the background shows up as a banner in the panel; one found right after launch opens Sparkle's window. The ⋯ menu has **Check for Updates…** and **Check Automatically**.
+
+To ship one: bump `VERSION` in `build.sh`, commit and push, then `./release.sh --publish`. It builds the notarized DMG, writes `build/appcast.xml` signed with the Sparkle key, and creates GitHub release `v<version>` with both attached.
+
+The Sparkle signing key (EdDSA) lives in the login keychain; its public half is `SPARKLE_PUBLIC_KEY` in `build.sh`. Installed copies only accept updates signed with it, so back it up:
+
+```bash
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key   # export; store somewhere safe, then delete the file
+.build/artifacts/sparkle/Sparkle/bin/generate_keys -f sparkle-private-key   # import on another Mac
+```
+
 ## How it detects "AI is working"
 
 | Source | Signal | Precision |
@@ -55,4 +68,4 @@ Verify: `pmset -g assertions | grep Vigil`
 ## Files
 
 - `~/Library/Application Support/Vigil/sessions/*.json` — one file per active Claude turn
-- `Sources/Vigil/` — `SleepGuard` (assertion), `Hook` (hook entry point), `SessionStore`, `ProcessWatcher`, `HookInstaller`, `VigilModel` (state), `VigilApp` + `PanelView` (SwiftUI UI)
+- `Sources/Vigil/` — `SleepGuard` (assertion), `Hook` (hook entry point), `SessionStore`, `ProcessWatcher`, `HookInstaller`, `VigilModel` (state), `Updater` (Sparkle), `VigilApp` + `PanelView` (SwiftUI UI)

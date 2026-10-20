@@ -6,6 +6,7 @@ import AppKit
 
 struct PanelView: View {
     @EnvironmentObject private var model: VigilModel
+    @EnvironmentObject private var updater: Updater
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -24,6 +25,7 @@ struct PanelView: View {
             SettingsSection()
 
             if let message = model.errorMessage { ErrorBanner(message: message) }
+            if let version = updater.pendingVersion { UpdateBanner(version: version) }
 
             Divider()
             Footer()
@@ -341,7 +343,25 @@ private struct Chip: View {
     }
 }
 
-// MARK: - Error + footer
+// MARK: - Banners + footer
+
+private struct UpdateBanner: View {
+    @EnvironmentObject private var updater: Updater
+    let version: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.down.circle.fill").foregroundStyle(Color.accentColor)
+            Text("Vigil \(version) is available").font(.caption)
+            Spacer(minLength: 0)
+            Button("Update") { updater.checkForUpdates() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.12)))
+    }
+}
 
 private struct ErrorBanner: View {
     @EnvironmentObject private var model: VigilModel
@@ -365,6 +385,7 @@ private struct ErrorBanner: View {
 
 private struct Footer: View {
     @EnvironmentObject private var model: VigilModel
+    @EnvironmentObject private var updater: Updater
 
     var body: some View {
         HStack(spacing: 10) {
@@ -385,6 +406,9 @@ private struct Footer: View {
                     Button("Connect Claude Code") { model.installHooks() }
                 }
                 Button("Show Sessions Folder") { model.openSessionsFolder() }
+                Divider()
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                Toggle("Check Automatically", isOn: $updater.automaticallyChecks)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }

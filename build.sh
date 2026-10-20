@@ -1,10 +1,14 @@
 #!/bin/bash
-# Builds build/Vigil.app. Requires Xcode or Command Line Tools (Swift 5.9+).
+# Builds build/Vigil.app. Requires Xcode or Command Line Tools (Swift 6+).
 #   ./build.sh            this Mac's architecture, ad-hoc signed (local use)
 #   ./build.sh --release  universal (arm64 + x86_64), Developer ID signed with hardened runtime
 set -euo pipefail
 
 VERSION="0.3"
+# Sparkle checks the appcast attached to the latest release of this (public) repo.
+FEED_URL="https://github.com/okiro/vigil/releases/latest/download/appcast.xml"
+# Public half of the EdDSA key in the login keychain (generate_keys); release.sh signs with the private half.
+SPARKLE_PUBLIC_KEY="KBIGExn4kVi7XAuit1+sqwRzhKfQZMyIMebDHgFqgzA="
 IDENTITY="${SIGN_IDENTITY:-Developer ID Application}"
 RELEASE=0
 [[ "${1:-}" == "--release" ]] && RELEASE=1
@@ -20,8 +24,10 @@ fi
 
 APP="build/Vigil.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN" "$APP/Contents/MacOS/Vigil"
+cp -R "$(dirname "$BIN")/Sparkle.framework" "$APP/Contents/Frameworks/"
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/Vigil"
 
 ICONSET="$(mktemp -d)/AppIcon.iconset"
 mkdir -p "$ICONSET"
@@ -47,12 +53,23 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
+    <key>SUFeedURL</key><string>$FEED_URL</string>
+    <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
+    <key>SUEnableAutomaticChecks</key><true/>
 </dict>
 </plist>
 PLIST
 
 if (( RELEASE )); then
-    codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
+    # Inside out, no --deep: https://sparkle-project.org/documentation/sandboxing/ ("Code Signing")
+    SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+    sign() { codesign --force --options runtime --timestamp --sign "$IDENTITY" "$@"; }
+    sign "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+    sign --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+    sign "$SPARKLE/Versions/B/Autoupdate"
+    sign "$SPARKLE/Versions/B/Updater.app"
+    sign "$SPARKLE"
+    sign "$APP"
 else
     codesign --force --sign - "$APP"
 fi

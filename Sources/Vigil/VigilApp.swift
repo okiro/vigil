@@ -2,11 +2,13 @@ import SwiftUI
 
 struct VigilApp: App {
     @StateObject private var model = VigilModel()
+    @StateObject private var updater = Updater()
 
     var body: some Scene {
         MenuBarExtra {
             PanelView()
                 .environmentObject(model)
+                .environmentObject(updater)
         } label: {
             // Template icon + text: macOS tints both for light/dark menu bars automatically.
             HStack(spacing: 2) {
