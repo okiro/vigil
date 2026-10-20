@@ -3,13 +3,14 @@ import SwiftUI
 import ServiceManagement
 
 enum Mode: Int, CaseIterable, Identifiable {
-    case automatic = 0, alwaysOn = 1, off = 2
+    case automatic = 0, alwaysOn = 1, off = 2, timed = 3
     var id: Int { rawValue }
     var title: String {
         switch self {
         case .automatic: return "Auto"
         case .alwaysOn:  return "Always"
         case .off:       return "Off"
+        case .timed:     return "Timer"
         }
     }
 }
@@ -23,20 +24,39 @@ final class VigilModel: NSObject, ObservableObject {
         static let patterns = "processPatterns"
         static let staleHours = "staleHours"
         static let askedHooks = "askedHooks"
+        static let timerEnd = "timerEnd"
+        static let timerMinutes = "timerMinutes"
+        static let modeAfterTimer = "modeAfterTimer"
     }
+
+    /// Lengths offered by the Timer segment's dropdown, in minutes.
+    static let timerOptions = [30, 60, 120, 240, 480]
 
     // Live state
     @Published private(set) var sessions: [SessionRecord] = []
     @Published private(set) var processes: [String] = []
     @Published private(set) var isActive = false
     @Published private(set) var awakeSince: Date?
+    /// Rounded up, so the menu-bar countdown reads 0:01 in the last minute, not 0:00.
+    @Published private(set) var minutesLeft = 0
     @Published private(set) var hooksInstalled = false
     @Published private(set) var launchAtLogin = false
     @Published var errorMessage: String?
 
     // Settings (persisted)
     @Published var mode: Mode {
-        didSet { defaults.set(mode.rawValue, forKey: Key.mode); tick() }
+        didSet {
+            defaults.set(mode.rawValue, forKey: Key.mode)
+            if mode != .timed { timerEnd = nil }
+            tick()
+        }
+    }
+    /// Timer mode keeps the Mac awake until this moment, then goes back to the mode before it.
+    @Published private(set) var timerEnd: Date? {
+        didSet { defaults.set(timerEnd, forKey: Key.timerEnd) }
+    }
+    @Published private(set) var timerMinutes: Int {
+        didSet { defaults.set(timerMinutes, forKey: Key.timerMinutes) }
     }
     @Published var keepDisplayAwake: Bool {
         didSet { defaults.set(keepDisplayAwake, forKey: Key.display); tick() }
@@ -62,8 +82,12 @@ final class VigilModel: NSObject, ObservableObject {
             Key.watch: true,
             Key.patterns: ["codex", "aider", "ollama runner"],
             Key.staleHours: 6.0,
+            Key.timerMinutes: 60,
+            Key.modeAfterTimer: Mode.automatic.rawValue,
         ])
         mode = Mode(rawValue: d.integer(forKey: Key.mode)) ?? .automatic
+        timerEnd = d.object(forKey: Key.timerEnd) as? Date
+        timerMinutes = d.integer(forKey: Key.timerMinutes)
         keepDisplayAwake = d.bool(forKey: Key.display)
         watchProcesses = d.bool(forKey: Key.watch)
         patterns = d.stringArray(forKey: Key.patterns) ?? []
@@ -90,10 +114,11 @@ final class VigilModel: NSObject, ObservableObject {
         return isActive ? "cup.and.saucer.fill" : "cup.and.saucer"
     }
 
-    /// ∞ when forced on; a number only from 2 agents up (the filled cup already says "1").
+    /// ∞ when forced on, h:mm left on a timer; a number only from 2 agents up (the filled cup already says "1").
     var menuBadge: String? {
         switch mode {
         case .alwaysOn:  return "∞"
+        case .timed:     return String(format: "%d:%02d", minutesLeft / 60, minutesLeft % 60)
         case .automatic: return activeCount >= 2 ? "\(activeCount)" : nil
         case .off:       return nil
         }
@@ -102,6 +127,13 @@ final class VigilModel: NSObject, ObservableObject {
     // MARK: Polling
 
     @objc func tick() {
+        if mode == .timed, (timerEnd ?? .distantPast) <= Date() {
+            mode = Mode(rawValue: defaults.integer(forKey: Key.modeAfterTimer)) ?? .automatic  // ticks again
+            return
+        }
+        let left = timerEnd.map { Int(($0.timeIntervalSinceNow / 60).rounded(.up)) } ?? 0
+        if left != minutesLeft { minutesLeft = left }
+
         let newSessions = SessionStore.liveSessions(maxAge: defaults.double(forKey: Key.staleHours) * 3600)
         let newProcesses = (mode == .automatic && watchProcesses) ? ProcessWatcher.matches(patterns) : []
         if newSessions != sessions { sessions = newSessions }
@@ -109,9 +141,9 @@ final class VigilModel: NSObject, ObservableObject {
 
         let active: Bool
         switch mode {
-        case .automatic: active = !newSessions.isEmpty || !newProcesses.isEmpty
-        case .alwaysOn:  active = true
-        case .off:       active = false
+        case .automatic:        active = !newSessions.isEmpty || !newProcesses.isEmpty
+        case .alwaysOn, .timed: active = true
+        case .off:              active = false
         }
         if active != isActive {
             isActive = active
@@ -127,6 +159,19 @@ final class VigilModel: NSObject, ObservableObject {
     }
 
     // MARK: Actions
+
+    /// Picking a length again, or another one, restarts the countdown from now.
+    func startTimer(minutes: Int) {
+        timerMinutes = minutes
+        timerEnd = Date().addingTimeInterval(TimeInterval(minutes * 60))
+        if mode == .timed {
+            tick()
+        } else {
+            // Always would make the timer pointless, so it comes back as Auto.
+            defaults.set(mode == .off ? Mode.off.rawValue : Mode.automatic.rawValue, forKey: Key.modeAfterTimer)
+            mode = .timed
+        }
+    }
 
     func release(_ id: String) {
         SessionStore.remove(id)

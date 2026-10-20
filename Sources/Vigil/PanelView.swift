@@ -12,11 +12,7 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 14) {
             StatusHeader()
 
-            Picker("Mode", selection: $model.mode) {
-                ForEach(Mode.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ModePicker()
 
             if !model.hooksInstalled { ConnectCard() }
 
@@ -70,6 +66,9 @@ private struct StatusHeader: View {
     private var tint: Color { model.isActive ? .green : .secondary }
 
     private var title: String {
+        if model.mode == .timed, let end = model.timerEnd {
+            return "Awake until \(end.formatted(date: .omitted, time: .shortened))"
+        }
         switch (model.mode, model.isActive) {
         case (.off, _):      return "Sleep guard off"
         case (.alwaysOn, _): return "Always awake"
@@ -81,6 +80,8 @@ private struct StatusHeader: View {
     @ViewBuilder private var subtitle: some View {
         if model.mode == .off {
             Text("Your Mac sleeps normally")
+        } else if model.mode == .timed, let end = model.timerEnd {
+            (Text(end, style: .timer) + Text(" left") + Text(agentsSuffix)).monospacedDigit()
         } else if model.isActive, let since = model.awakeSince {
             (Text("Awake for ") + Text(since, style: .timer) + Text(agentsSuffix)).monospacedDigit()
         } else {
@@ -148,6 +149,84 @@ private struct WindowVisibility: NSViewRepresentable {
             DispatchQueue.main.async { [isVisible] in
                 if isVisible.wrappedValue != visible { isVisible.wrappedValue = visible }
             }
+        }
+    }
+}
+
+// MARK: - Mode picker
+
+/// Auto | Always | Off | Timer ▾. SwiftUI's segmented Picker can't give a segment a menu,
+/// so this is the AppKit control; clicking Timer drops down the lengths to stay awake for.
+private struct ModePicker: NSViewRepresentable {
+    @EnvironmentObject private var model: VigilModel
+
+    private static let timerSegment = Mode.allCases.firstIndex(of: .timed)!
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(
+            labels: Mode.allCases.map(\.title), trackingMode: .selectOne,
+            target: context.coordinator, action: #selector(Coordinator.segmentClicked(_:))
+        )
+        control.segmentDistribution = .fillEqually
+        control.setMenu(context.coordinator.menu, forSegment: Self.timerSegment)
+        control.setShowsMenuIndicator(true, forSegment: Self.timerSegment)
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        let timing = model.mode == .timed
+        control.setLabel(timing ? Coordinator.length(model.timerMinutes, .abbreviated) : Mode.timed.title,
+                         forSegment: Self.timerSegment)
+        control.selectedSegment = Mode.allCases.firstIndex(of: model.mode) ?? 0
+        for item in context.coordinator.menu.items {
+            item.state = timing && item.tag == model.timerMinutes ? .on : .off
+        }
+    }
+
+    /// Full width, like the segmented Picker it replaces.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSegmentedControl, context: Context) -> CGSize? {
+        let fitting = nsView.intrinsicContentSize
+        return CGSize(width: proposal.width ?? fitting.width, height: fitting.height)
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        let menu = NSMenu()
+        private let model: VigilModel
+
+        init(model: VigilModel) {
+            self.model = model
+            super.init()
+            for minutes in VigilModel.timerOptions {
+                let item = NSMenuItem(title: Self.length(minutes, .full), action: #selector(startTimer(_:)), keyEquivalent: "")
+                item.target = self
+                item.tag = minutes
+                menu.addItem(item)
+            }
+        }
+
+        /// "2h" for the segment, "2 hours" for the menu.
+        static func length(_ minutes: Int, _ style: DateComponentsFormatter.UnitsStyle) -> String {
+            let formatter = DateComponentsFormatter()
+            formatter.unitsStyle = style
+            formatter.allowedUnits = [.hour, .minute]
+            return formatter.string(from: TimeInterval(minutes * 60)) ?? "\(minutes)m"
+        }
+
+        @objc func segmentClicked(_ control: NSSegmentedControl) {
+            let picked = Mode.allCases[control.selectedSegment]
+            guard picked == .timed else { model.mode = picked; return }
+
+            // Timer itself only opens the menu; picking a length starts it.
+            let width = control.bounds.width / CGFloat(control.segmentCount)
+            let below = NSPoint(x: width * CGFloat(control.selectedSegment), y: control.isFlipped ? control.bounds.maxY + 4 : -4)
+            menu.popUp(positioning: nil, at: below, in: control)
+            control.selectedSegment = Mode.allCases.firstIndex(of: model.mode) ?? 0
+        }
+
+        @objc private func startTimer(_ item: NSMenuItem) {
+            model.startTimer(minutes: item.tag)
         }
     }
 }

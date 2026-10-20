@@ -67,9 +67,9 @@ Add `claude` to watched processes if you want "any open Claude Code = awake" ins
 
 ## UI
 
-Click the menu-bar cup to open the panel: live status, Auto / Always / Off, active sessions (hover → ✕ to release), watched-process chips, settings.
+Click the menu-bar cup to open the panel: live status, Auto / Always / Off / Timer (stay awake for 30 min – 8 h, then back to Auto, or Off if it was off), active sessions (hover → ✕ to release), watched-process chips, settings.
 
-Menu-bar icon: outlined cup = idle, filled cup = awake, number = 2+ agents working, ∞ = Always mode, moon = Off.
+Menu-bar icon: outlined cup = idle, filled cup = awake, number = 2+ agents working, ∞ = Always mode, 1:59 = time left on a timer, moon = Off.
 Light/Dark follows macOS appearance automatically (semantic colors only).
 
 ## Mechanism
