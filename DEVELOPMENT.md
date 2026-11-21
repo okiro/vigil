@@ -59,9 +59,12 @@ xcrun notarytool store-credentials vigil-notary --apple-id <your Apple ID> --tea
 | Source | Signal | Precision |
 |---|---|---|
 | Claude Code hooks | `UserPromptSubmit` → awake, `Stop` / `StopFailure` (API error) / `SessionEnd` → release (`Stop` holds while background agents, workflows, shells or monitors still run — their report starts a new turn) | Exact, per session |
-| Process watch | Any command line naming a pattern as a program or argument, ignoring directories in paths and idle servers (`app-server`, `mcp-server` — e.g. the VS Code Codex extension or the Claude Code Codex plugin) (default: `codex`, `aider`, `ollama runner`) | Coarse: "running" ≠ "working" |
+| Codex hooks (`~/.codex/hooks.json`) | `UserPromptSubmit` → awake, `Stop` / `Interrupt` (Esc) / `SessionEnd` → release. Codex shows "Hooks need review" once; cmux's Codex wrapper skips that with `--dangerously-bypass-hook-trust`. Codex clamps some hook timeouts to 3 s, so Vigil asks for 3. | Exact, per session |
+| Process watch | Any command line naming a pattern as a program or argument, ignoring directories in paths and idle servers (`app-server`, `mcp-server` — e.g. the VS Code Codex extension or the Claude Code Codex plugin) (default: `codex`, `aider`, `ollama runner`; connecting Codex removes `codex`, disconnecting adds it back) | Coarse: "running" ≠ "working" |
 
-Safety nets for Claude sessions: a session is dropped if its Claude process exits, or 6 h after its last prompt (covers Esc-interrupted turns, where `Stop` doesn't fire). You can also click a session in the menu to release it.
+Hooks run `Vigil hook start|stop` (Claude Code) or `Vigil hook start|stop codex`; the record's `agent` field labels the session in the panel.
+
+Safety nets for hook sessions: a session is dropped if its agent process exits, or 6 h after its last prompt (covers Esc-interrupted turns, where `Stop` doesn't fire). You can also click a session in the menu to release it.
 
 Add `claude` to watched processes if you want "any open Claude Code = awake" instead of per-turn precision.
 
@@ -69,7 +72,7 @@ Add `claude` to watched processes if you want "any open Claude Code = awake" ins
 
 Click the menu-bar cup to open the panel: live status, Auto / Always / Off / Timer (stay awake for 30 min – 8 h, then back to Auto, or Off if it was off), active sessions (hover → ✕ to release), watched-process chips, settings.
 
-Menu-bar icon: outlined cup = idle, filled cup = awake, number = 2+ agents working, ∞ = Always mode, 1:59 = time left on a timer, moon = Off.
+Menu-bar icon: outlined cup = idle, filled cup = awake, number = 2+ agents working, ∞ = Always mode, 1:59 = time left on a timer, moon = Off. With **Stay awake with lid closed** on, the cup is red (a non-template image, the only way to color a menu-bar icon): outlined = armed, filled = closing the lid won't sleep the Mac right now. It goes back to the normal color while the override is paused.
 Light/Dark follows macOS appearance automatically (semantic colors only).
 
 ## Mechanism
@@ -80,12 +83,21 @@ A single IOKit power assertion (what `caffeinate` uses), released automatically 
 
 Verify: `pmset -g assertions | grep Vigil`
 
+### Stay awake with lid closed
+
+No assertion can stop clamshell sleep, so `LidGuard` sets `pmset -a disablesleep 1` (shows as `SleepDisabled 1` in `pmset -g`) — only while Vigil is keeping the Mac awake — and `0` as soon as it isn't.
+- **Permission:** turning the toggle on the first time shows the macOS admin prompt, which installs `/etc/sudoers.d/vigil` (validated with `visudo -c`): this user may run exactly `/usr/bin/pmset -a disablesleep 0` and `… 1` without a password, via `sudo -n`. **Remove Lid Permission** in the ⋯ menu deletes it.
+- **Never stuck on:** Vigil undoes it on quit (including Sparkle's update relaunch) and at launch if a crash left it set (`lidOverrideApplied` in its defaults; a `disablesleep` you set yourself is left alone). If Vigil crashes and isn't reopened, the Mac can't sleep until it is — `sudo pmset -a disablesleep 0` fixes it by hand.
+- **Paused** (normal idle-sleep assertion stays) on battery below 20 % or at thermal state *serious*, so a laptop in a bag doesn't cook or drain.
+- **Lid already shut when work ends:** after undoing the override, Vigil runs `pmset sleepnow` if `IOPMrootDomain` reports `AppleClamshellState` and `AppleClamshellCausesSleep` (not clamshell mode with an external display).
+
 ## Limits
 
-- **Closing the lid sleeps the Mac anyway** (unless on power with an external display). No user-space assertion can stop clamshell sleep; the only override is `sudo pmset -a disablesleep 1`, which Vigil deliberately doesn't touch.
-- Hook config lives in `~/.claude/settings.json`; a backup is written to `settings.json.vigil-backup` on every change.
+- **Closing the lid sleeps the Mac** (unless on power with an external display) unless **Stay awake with lid closed** is on — see above.
+- Hook config lives in `~/.claude/settings.json` and `~/.codex/hooks.json`; a `.vigil-backup` copy is written next to each on every change.
 
 ## Files
 
-- `~/Library/Application Support/Vigil/sessions/*.json` — one file per active Claude turn
-- `Sources/Vigil/` — `SleepGuard` (assertion), `Hook` (hook entry point), `SessionStore`, `ProcessWatcher`, `HookInstaller`, `VigilModel` (state), `Updater` (Sparkle), `VigilApp` + `PanelView` (SwiftUI UI)
+- `~/Library/Application Support/Vigil/sessions/*.json` — one file per active Claude Code or Codex turn
+- `Resources/AgentIcons/` — Claude and OpenAI logos for session rows (Lobe Icons, MIT; vector PDFs, see its README)
+- `Sources/Vigil/` — `SleepGuard` (assertion), `LidGuard` (lid-closed override), `Hook` (hook entry point), `SessionStore`, `ProcessWatcher`, `HookInstaller`, `VigilModel` (state), `Updater` (Sparkle), `VigilApp` + `PanelView` (SwiftUI UI)

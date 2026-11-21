@@ -38,6 +38,8 @@ for px in 16 32 128 256 512; do
     sips -z $((px * 2)) $((px * 2)) Resources/AppIcon.png --out "$ICONSET/icon_${px}x${px}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/AgentIcons/*.pdf "$APP/Contents/Resources/"
+cp Resources/AgentIcons/LICENSE "$APP/Contents/Resources/AgentIcons-LICENSE"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -1,9 +1,9 @@
 import Foundation
 import Darwin
 
-/// Entry point for Claude Code hooks. Must never block or fail Claude: always exits 0, prints nothing.
+/// Entry point for Claude Code and Codex hooks. Must never block or fail the agent: always exits 0, prints nothing.
 enum Hook {
-    static func run(_ action: String) -> Never {
+    static func run(_ action: String, agent: String?) -> Never {
         let input = FileHandle.standardInput.readDataToEndOfFile()
         let json = ((try? JSONSerialization.jsonObject(with: input)) as? [String: Any]) ?? [:]
         let owner = ownerPID()
@@ -12,10 +12,11 @@ enum Hook {
         switch action {
         case "start":
             let cwd = (json["cwd"] as? String) ?? FileManager.default.currentDirectoryPath
-            SessionStore.save(SessionRecord(id: id, pid: owner, cwd: cwd, started: Date()))
+            SessionStore.save(SessionRecord(id: id, pid: owner, cwd: cwd, started: Date(), agent: agent))
         case "stop":
             // A turn that hands off to background work ends with `Stop` while it runs on;
             // keep the session — its report wakes Claude for a new turn that ends with its own `Stop`.
+            // (Codex's `Stop` has no `background_tasks`, so it always releases.)
             if json["hook_event_name"] as? String == "Stop" && backgroundWorkRunning(json) { break }
             SessionStore.remove(id)
         default:
@@ -32,7 +33,7 @@ enum Hook {
         return tasks.contains { ["running", "pending"].contains($0["status"] as? String ?? "") }
     }
 
-    /// The Claude Code process that spawned this hook, skipping any intermediate shells.
+    /// The agent process that spawned this hook, skipping any intermediate shells.
     static func ownerPID() -> pid_t {
         let shells: Set<String> = ["sh", "bash", "zsh", "dash", "fish", "env"]
         var pid = getppid()

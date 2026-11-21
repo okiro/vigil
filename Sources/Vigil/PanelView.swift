@@ -14,7 +14,7 @@ struct PanelView: View {
 
             ModePicker()
 
-            if !model.hooksInstalled { ConnectCard() }
+            if !model.hooksInstalled || (model.codexAvailable && !model.codexHooksInstalled) { ConnectCard() }
 
             ActivitySection()
             Divider()
@@ -63,7 +63,7 @@ private struct StatusHeader: View {
         .background(WindowVisibility(isVisible: $onScreen))
     }
 
-    private var tint: Color { model.isActive ? .green : .secondary }
+    private var tint: Color { model.lidArmed ? .red : model.isActive ? .green : .secondary }
 
     private var title: String {
         if model.mode == .timed, let end = model.timerEnd {
@@ -238,19 +238,32 @@ private struct ConnectCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Connect Claude Code").font(.callout.weight(.semibold))
-            Text("Stay awake exactly while Claude works, not just while it's open.")
+            Text(title).font(.callout.weight(.semibold))
+            Text("Stay awake exactly while it works, not just while it's open.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Connect") { model.installHooks() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+            HStack(spacing: 6) {
+                if !model.hooksInstalled {
+                    Button(missing.count > 1 ? "Connect Claude Code" : "Connect") { model.installHooks() }
+                }
+                if model.codexAvailable && !model.codexHooksInstalled {
+                    Button(missing.count > 1 ? "Connect Codex" : "Connect") { model.installCodexHooks() }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.12)))
     }
+
+    private var missing: [String] {
+        (model.hooksInstalled ? [] : ["Claude Code"]) + (model.codexAvailable && !model.codexHooksInstalled ? ["Codex"] : [])
+    }
+
+    private var title: String { "Connect " + missing.joined(separator: " and ") }
 }
 
 // MARK: - Activity
@@ -282,14 +295,12 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "sparkle")
-                .foregroundStyle(.orange)
-                .frame(width: 20)
+            AgentIcon(codex: isCodex)
             VStack(alignment: .leading, spacing: 1) {
                 Text(URL(fileURLWithPath: session.cwd).lastPathComponent)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
-                Text((session.cwd as NSString).abbreviatingWithTildeInPath)
+                Text((isCodex ? "Codex" : "Claude") + " · " + (session.cwd as NSString).abbreviatingWithTildeInPath)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -313,6 +324,41 @@ private struct SessionRow: View {
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
         .onHover { hovering = $0 }
+    }
+
+    private var isCodex: Bool { session.agent == "codex" }
+}
+
+/// The agent's logo on a rounded tile, like a tiny app icon: Claude's starburst on orange,
+/// the OpenAI mark on white for Codex. Fixed colors, so it reads the same in light and dark.
+private struct AgentIcon: View {
+    let codex: Bool
+
+    private static let claudeOrange = Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
+    private static let claudeGlyph = glyph("claude")
+    private static let openAIGlyph = glyph("openai")
+
+    /// Vector PDFs from Resources/AgentIcons, used as templates so SwiftUI can color them.
+    private static func glyph(_ name: String) -> NSImage? {
+        let image = Bundle.main.image(forResource: name)
+        image?.isTemplate = true
+        return image
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        shape
+            .fill(codex ? Color.white : Self.claudeOrange)
+            .overlay(shape.strokeBorder(Color.black.opacity(codex ? 0.12 : 0), lineWidth: 0.5))
+            .overlay {
+                if let glyph = codex ? Self.openAIGlyph : Self.claudeGlyph {
+                    Image(nsImage: glyph).resizable().scaledToFit().padding(3)
+                } else {
+                    Image(systemName: "sparkle").font(.system(size: 10, weight: .semibold))   // dev builds without Resources
+                }
+            }
+            .foregroundStyle(codex ? Color.black : Color.white)
+            .frame(width: 20, height: 20)
     }
 }
 
@@ -346,6 +392,19 @@ private struct SettingsSection: View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(title: "Settings")
             SettingToggle(title: "Keep display on", isOn: $model.keepDisplayAwake)
+            VStack(alignment: .leading, spacing: 2) {
+                SettingToggle(title: "Stay awake with lid closed", isOn: Binding(
+                    get: { model.stayAwakeWithLidClosed },
+                    set: { model.setStayAwakeWithLidClosed($0) }
+                ))
+                if model.stayAwakeWithLidClosed {
+                    if let pause = model.lidPause {
+                        Text(pause.reason).font(.caption).foregroundStyle(.orange)
+                    } else {
+                        Text("Only while Vigil is keeping the Mac awake").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
             SettingToggle(title: "Watch other agents", isOn: $model.watchProcesses)
             if model.watchProcesses { PatternEditor() }
             SettingToggle(title: "Launch at login", isOn: Binding(
@@ -468,12 +527,14 @@ private struct Footer: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if model.hooksInstalled {
-                Label("Claude Code connected", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            } else {
-                Label("Claude Code not connected", systemImage: "circle.dashed")
+            if connected.isEmpty {
+                Label("Not connected", systemImage: "circle.dashed")
                     .foregroundStyle(.secondary)
+            } else {
+                Label(connected.joined(separator: " + "), systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .help(connected.joined(separator: " and ") + " connected")
             }
             Spacer()
             Text("v\(version)")
@@ -483,6 +544,14 @@ private struct Footer: View {
                     Button("Disconnect Claude Code") { model.removeHooks() }
                 } else {
                     Button("Connect Claude Code") { model.installHooks() }
+                }
+                if model.codexHooksInstalled {
+                    Button("Disconnect Codex") { model.removeCodexHooks() }
+                } else if model.codexAvailable {
+                    Button("Connect Codex") { model.installCodexHooks() }
+                }
+                if model.lidPermissionInstalled {
+                    Button("Remove Lid Permission") { model.removeLidPermission() }
                 }
                 Button("Show Sessions Folder") { model.openSessionsFolder() }
                 Divider()
@@ -501,6 +570,10 @@ private struct Footer: View {
                 .keyboardShortcut("q")
         }
         .font(.caption)
+    }
+
+    private var connected: [String] {
+        (model.hooksInstalled ? ["Claude Code"] : []) + (model.codexHooksInstalled ? ["Codex"] : [])
     }
 
     private var version: String {

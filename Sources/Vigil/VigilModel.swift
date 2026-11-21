@@ -20,6 +20,7 @@ final class VigilModel: NSObject, ObservableObject {
     private enum Key {
         static let mode = "mode"
         static let display = "keepDisplayAwake"
+        static let lid = "stayAwakeWithLidClosed"
         static let watch = "watchProcesses"
         static let patterns = "processPatterns"
         static let staleHours = "staleHours"
@@ -40,6 +41,10 @@ final class VigilModel: NSObject, ObservableObject {
     /// Rounded up, so the menu-bar countdown reads 0:01 in the last minute, not 0:00.
     @Published private(set) var minutesLeft = 0
     @Published private(set) var hooksInstalled = false
+    @Published private(set) var codexHooksInstalled = false
+    @Published private(set) var codexAvailable = false
+    /// Why the lid-closed override is paused while Vigil is otherwise keeping the Mac awake.
+    @Published private(set) var lidPause: LidGuard.Pause?
     @Published private(set) var launchAtLogin = false
     @Published var errorMessage: String?
 
@@ -61,6 +66,10 @@ final class VigilModel: NSObject, ObservableObject {
     @Published var keepDisplayAwake: Bool {
         didSet { defaults.set(keepDisplayAwake, forKey: Key.display); tick() }
     }
+    /// Set through `setStayAwakeWithLidClosed`, which asks for admin rights the first time.
+    @Published private(set) var stayAwakeWithLidClosed: Bool {
+        didSet { defaults.set(stayAwakeWithLidClosed, forKey: Key.lid); tick() }
+    }
     @Published var watchProcesses: Bool {
         didSet { defaults.set(watchProcesses, forKey: Key.watch); tick() }
     }
@@ -72,6 +81,7 @@ final class VigilModel: NSObject, ObservableObject {
 
     private let defaults = UserDefaults.standard
     private let sleepGuard = SleepGuard()
+    private let lidGuard = LidGuard()
     private var timer: Timer?
 
     override init() {
@@ -79,6 +89,7 @@ final class VigilModel: NSObject, ObservableObject {
         d.register(defaults: [
             Key.mode: Mode.automatic.rawValue,
             Key.display: false,
+            Key.lid: false,
             Key.watch: true,
             Key.patterns: ["codex", "aider", "ollama runner"],
             Key.staleHours: 6.0,
@@ -89,6 +100,7 @@ final class VigilModel: NSObject, ObservableObject {
         timerEnd = d.object(forKey: Key.timerEnd) as? Date
         timerMinutes = d.integer(forKey: Key.timerMinutes)
         keepDisplayAwake = d.bool(forKey: Key.display)
+        stayAwakeWithLidClosed = d.bool(forKey: Key.lid)
         watchProcesses = d.bool(forKey: Key.watch)
         patterns = d.stringArray(forKey: Key.patterns) ?? []
         super.init()
@@ -98,6 +110,10 @@ final class VigilModel: NSObject, ObservableObject {
         tick()
         timer = Timer.scheduledTimer(timeInterval: 3, target: self, selector: #selector(tick), userInfo: nil, repeats: true)
         timer?.tolerance = 1
+        // Quitting (or Sparkle relaunching for an update) must never leave sleep disabled.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(willTerminate), name: NSApplication.willTerminateNotification, object: nil
+        )
 
         if !hooksInstalled && !d.bool(forKey: Key.askedHooks) {
             d.set(true, forKey: Key.askedHooks)
@@ -112,6 +128,12 @@ final class VigilModel: NSObject, ObservableObject {
     var menuIcon: String {
         if mode == .off { return "moon.zzz" }
         return isActive ? "cup.and.saucer.fill" : "cup.and.saucer"
+    }
+
+    /// Red cup: closing the lid won't sleep the Mac — outlined while idle (armed), filled while it holds.
+    /// Not when Off, and not while the override is paused for battery or heat.
+    var lidArmed: Bool {
+        stayAwakeWithLidClosed && mode != .off && !(isActive && lidPause != nil)
     }
 
     /// ∞ when forced on, h:mm left on a timer; a number only from 2 agents up (the filled cup already says "1").
@@ -150,11 +172,20 @@ final class VigilModel: NSObject, ObservableObject {
             awakeSince = active ? Date() : nil
         }
         sleepGuard.update(active: active, display: keepDisplayAwake)
+
+        let pause = (stayAwakeWithLidClosed && active) ? lidGuard.pause : nil
+        if pause != lidPause { lidPause = pause }
+        if !lidGuard.set(stayAwakeWithLidClosed && active && pause == nil) && stayAwakeWithLidClosed {
+            stayAwakeWithLidClosed = false
+            errorMessage = "Vigil lost permission to keep the Mac awake with the lid closed. Turn the setting on again to grant it."
+        }
         if !active { updater.installDownloadedUpdate() }
     }
 
     func refreshStatus() {
-        hooksInstalled = HookInstaller.isInstalled
+        hooksInstalled = HookInstaller.claude.isInstalled
+        codexHooksInstalled = HookInstaller.codex.isInstalled
+        codexAvailable = HookInstaller.codex.isAvailable
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
@@ -189,13 +220,49 @@ final class VigilModel: NSObject, ObservableObject {
     }
 
     func installHooks() {
-        do { try HookInstaller.install(); errorMessage = nil } catch { errorMessage = error.localizedDescription }
+        do { try HookInstaller.claude.install(); errorMessage = nil } catch { errorMessage = error.localizedDescription }
         refreshStatus()
     }
 
     func removeHooks() {
-        do { try HookInstaller.uninstall() } catch { errorMessage = error.localizedDescription }
+        do { try HookInstaller.claude.uninstall() } catch { errorMessage = error.localizedDescription }
         refreshStatus()
+    }
+
+    /// Codex then reports each turn, so watching for a running `codex` process — which stays
+    /// "running" while Codex sits idle — is dropped. Disconnecting brings it back.
+    func installCodexHooks() {
+        do { try HookInstaller.codex.install(); errorMessage = nil } catch { errorMessage = error.localizedDescription; return }
+        refreshStatus()
+        patterns.removeAll { $0.caseInsensitiveCompare("codex") == .orderedSame }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "One more step in Codex"
+        alert.informativeText = "Restart any Codex sessions that are already open. If Codex says “Hooks need review”, choose “Trust all and continue” so it can tell Vigil when it's working."
+        alert.runModal()
+    }
+
+    func removeCodexHooks() {
+        do { try HookInstaller.codex.uninstall() } catch { errorMessage = error.localizedDescription }
+        refreshStatus()
+        if !codexHooksInstalled { addPattern("codex") }
+    }
+
+    /// Turning it on the first time shows the macOS admin prompt; cancelling leaves it off.
+    func setStayAwakeWithLidClosed(_ on: Bool) {
+        if on && !lidGuard.isAuthorized {
+            NSApp.activate(ignoringOtherApps: true)
+            guard lidGuard.authorize() else { return }
+        }
+        stayAwakeWithLidClosed = on
+    }
+
+    var lidPermissionInstalled: Bool { FileManager.default.fileExists(atPath: LidGuard.sudoersPath) }
+
+    func removeLidPermission() {
+        stayAwakeWithLidClosed = false
+        if !lidGuard.deauthorize() { errorMessage = "Couldn't remove \(LidGuard.sudoersPath)." }
     }
 
     func setLaunchAtLogin(_ on: Bool) {
@@ -213,6 +280,10 @@ final class VigilModel: NSObject, ObservableObject {
 
     func openSessionsFolder() {
         NSWorkspace.shared.open(SessionStore.directory)
+    }
+
+    @objc private func willTerminate() {
+        lidGuard.set(false)
     }
 
     @objc private func offerHookInstall() {

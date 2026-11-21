@@ -1,12 +1,13 @@
 import Foundation
 import Darwin
 
-/// One active Claude Code turn. Written by the hook, read by the app.
+/// One active agent turn (Claude Code or Codex). Written by the hook, read by the app.
 struct SessionRecord: Codable, Equatable, Identifiable {
     var id: String
-    var pid: Int32        // the Claude Code process that owns the session
+    var pid: Int32        // the agent process that owns the session
     var cwd: String
     var started: Date     // last prompt submitted
+    var agent: String?    // "codex", or nil for Claude Code (records written before Codex support have none)
 }
 
 enum SessionStore {
