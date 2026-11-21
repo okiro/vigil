@@ -58,7 +58,7 @@ xcrun notarytool store-credentials vigil-notary --apple-id <your Apple ID> --tea
 
 | Source | Signal | Precision |
 |---|---|---|
-| Claude Code hooks | `UserPromptSubmit` → awake, `Stop` / `StopFailure` (API error) / `SessionEnd` → release (`Stop` holds while background agents or workflows still run — their report starts a new turn) | Exact, per session |
+| Claude Code hooks | `UserPromptSubmit` → awake, `Stop` / `StopFailure` (API error) / `SessionEnd` → release (`Stop` holds while background agents, workflows, shells or monitors still run — their report starts a new turn) | Exact, per session |
 | Process watch | Any command line naming a pattern as a program or argument, ignoring directories in paths and idle servers (`app-server`, `mcp-server` — e.g. the VS Code Codex extension or the Claude Code Codex plugin) (default: `codex`, `aider`, `ollama runner`) | Coarse: "running" ≠ "working" |
 
 Safety nets for Claude sessions: a session is dropped if its Claude process exits, or 6 h after its last prompt (covers Esc-interrupted turns, where `Stop` doesn't fire). You can also click a session in the menu to release it.

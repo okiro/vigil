@@ -14,9 +14,9 @@ enum Hook {
             let cwd = (json["cwd"] as? String) ?? FileManager.default.currentDirectoryPath
             SessionStore.save(SessionRecord(id: id, pid: owner, cwd: cwd, started: Date()))
         case "stop":
-            // A turn that hands off to background agents ends with `Stop` while they work on;
-            // keep the session — their report wakes Claude for a new turn that ends with its own `Stop`.
-            if json["hook_event_name"] as? String == "Stop" && agentsRunning(json) { break }
+            // A turn that hands off to background work ends with `Stop` while it runs on;
+            // keep the session — its report wakes Claude for a new turn that ends with its own `Stop`.
+            if json["hook_event_name"] as? String == "Stop" && backgroundWorkRunning(json) { break }
             SessionStore.remove(id)
         default:
             break
@@ -24,14 +24,12 @@ enum Hook {
         exit(0)
     }
 
-    /// Background work in `Stop`'s `background_tasks` that is agents thinking on this Mac. Shells
-    /// and monitors are left out: they're often idle servers or watchers that never finish.
-    static func agentsRunning(_ json: [String: Any]) -> Bool {
+    /// Any in-flight entry in `Stop`'s `background_tasks`: agents, workflows, shells, monitors.
+    /// A shell that never finishes (a dev server) holds the session until Claude exits, the
+    /// 6 h safety net, or the user releases it from the menu.
+    static func backgroundWorkRunning(_ json: [String: Any]) -> Bool {
         let tasks = json["background_tasks"] as? [[String: Any]] ?? []
-        return tasks.contains { task in
-            ["subagent", "workflow"].contains(task["type"] as? String ?? "")
-                && ["running", "pending"].contains(task["status"] as? String ?? "")
-        }
+        return tasks.contains { ["running", "pending"].contains($0["status"] as? String ?? "") }
     }
 
     /// The Claude Code process that spawned this hook, skipping any intermediate shells.
