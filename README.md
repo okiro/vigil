@@ -2,7 +2,7 @@
   <img src="Resources/AppIcon.png" width="128" alt="Vigil icon">
 </p>
 
-<h1 align="center">Vigil</h1>
+<h1 align="center">Vigil <a href="https://github.com/okiro/vigil/releases/latest"><img src="https://img.shields.io/github/v/release/okiro/vigil?label=&color=8E8E93&style=flat-square" alt="Latest version" valign="middle"></a></h1>
 
 <p align="center">
   <b>Your Mac stays awake while your AI agent works, and sleeps as soon as it's done.</b>
@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshot.png" width="366" alt="Vigil's menu-bar panel keeping the Mac awake while Claude Code works">
+  <img src="docs/screenshot.png" width="366" alt="Vigil's menu-bar panel keeping the Mac awake while Claude Code and Codex work">
 </p>
 
 ---
