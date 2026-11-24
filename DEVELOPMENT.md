@@ -9,7 +9,7 @@ chmod +x build.sh && ./build.sh
 rm -rf /Applications/Vigil.app && cp -R build/Vigil.app /Applications/ && open /Applications/Vigil.app
 ```
 
-On first launch, click **Connect** to install the Claude Code hooks. Already-open Claude Code sessions pick up hooks on restart.
+On first launch, click **Connect** (next to **Activity** in the panel) to install the Claude Code hooks. Already-open Claude Code sessions pick up hooks on restart.
 Install from `/Applications` first — hooks point at the app's path. If you move it, use **Connect Claude Code** in the ⋯ menu again.
 
 ## Releases & auto-update
@@ -70,9 +70,11 @@ Add `claude` to watched processes if you want "any open Claude Code = awake" ins
 
 ## UI
 
-Click the menu-bar cup to open the panel: live status, Auto / Always / Off / Timer (stay awake for 30 min – 8 h, then back to Auto, or Off if it was off), active sessions (hover → ✕ to release), watched-process chips, settings.
+Click the menu-bar cup to open the panel: live status, Auto / Always / Off / Timer (stay awake for 30 min – 8 h, then back to Auto, or Off if it was off), active sessions (hover → ✕ to release; releasing the last one skips the wind-down), which agents are connected (next to **Activity**, with Connect links), watched-process chips, settings.
 
-Menu-bar icon: outlined cup = idle, filled cup = awake, number = 2+ agents working, ∞ = Always mode, 1:59 = time left on a timer, moon = Off. With **Stay awake with lid closed** on, the cup is red (a non-template image, the only way to color a menu-bar icon): outlined = armed, filled = closing the lid won't sleep the Mac right now. It goes back to the normal color while the override is paused.
+Wind-down: in Auto, when the last agent finishes, the Mac stays awake for **Stay awake after agents finish** (default 5 min; `graceMinutes`), then the assertion is dropped. A new turn cancels it, **Sleep now** ends it. The lid-closed override isn't held during the wind-down, so closing the lid after the agents finish still sleeps the Mac.
+
+Menu-bar icon: outlined cup = idle, filled cup = awake, draining cup = wind-down (`CupIcon`: `cup.and.saucer.fill` clipped to the time left, drawn over `cup.and.saucer`), number = 2+ agents working, ∞ = Always mode, 1:59 = time left on a timer, moon = Off. With **Stay awake with lid closed** on, the cup is red (a non-template image, the only way to color a menu-bar icon): outlined = armed, filled = closing the lid won't sleep the Mac right now. It goes back to the normal color while the override is paused.
 Light/Dark follows macOS appearance automatically (semantic colors only).
 
 ## Mechanism

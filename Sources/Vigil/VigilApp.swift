@@ -13,7 +13,10 @@ struct VigilApp: App {
             // Template icon + text: macOS tints both for light/dark menu bars automatically.
             // A red cup is a plain (non-template) image, the one way to color a menu-bar icon.
             HStack(spacing: 2) {
-                if model.lidArmed, let red = Self.redSymbol(model.menuIcon) {
+                if model.isWindingDown,
+                   let cup = CupIcon.image(level: model.windDownLevel, pointSize: 13, color: model.lidArmed ? .systemRed : nil) {
+                    Image(nsImage: cup)
+                } else if model.lidArmed, let red = Self.redSymbol(model.menuIcon) {
                     Image(nsImage: red)
                 } else {
                     Image(systemName: model.menuIcon)

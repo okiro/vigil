@@ -14,8 +14,6 @@ struct PanelView: View {
 
             ModePicker()
 
-            if !model.hooksInstalled || (model.codexAvailable && !model.codexHooksInstalled) { ConnectCard() }
-
             ActivitySection()
             Divider()
             SettingsSection()
@@ -45,40 +43,61 @@ private struct StatusHeader: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle().fill(tint.opacity(model.isActive ? 0.18 : 0.10))
-                if model.isActive && onScreen { PulseRing(color: tint) }
-                Image(systemName: model.menuIcon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(tint)
+                if model.isWindingDown {
+                    WindDownRing(level: model.windDownLevel, color: tint)
+                } else if model.isActive && onScreen {
+                    PulseRing(color: tint)
+                }
+                glyph.foregroundStyle(tint)
             }
             .frame(width: 42, height: 42)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
+                title.font(.headline).monospacedDigit()
                 subtitle
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
+            if model.isWindingDown {
+                Button("Sleep now") { model.sleepNow() }
+                    .controlSize(.small)
+                    .help("Stop waiting and let the Mac sleep")
+            }
         }
         .background(WindowVisibility(isVisible: $onScreen))
     }
 
     private var tint: Color { model.lidArmed ? .red : model.isActive ? .green : .secondary }
 
-    private var title: String {
+    @ViewBuilder private var glyph: some View {
+        if model.isWindingDown, let cup = CupIcon.image(level: model.windDownLevel, pointSize: 18, weight: .semibold) {
+            Image(nsImage: cup).renderingMode(.template)
+        } else {
+            Image(systemName: model.menuIcon).font(.system(size: 18, weight: .semibold))
+        }
+    }
+
+    private var title: Text {
         if model.mode == .timed, let end = model.timerEnd {
-            return "Awake until \(end.formatted(date: .omitted, time: .shortened))"
+            return Text("Awake until \(end.formatted(date: .omitted, time: .shortened))")
+        }
+        if let end = model.windDownEnd {
+            return Text("Sleeping in ") + Text(end, style: .timer)
         }
         switch (model.mode, model.isActive) {
-        case (.off, _):      return "Sleep guard off"
-        case (.alwaysOn, _): return "Always awake"
-        case (_, true):      return "Keeping Mac awake"
-        default:             return "Sleep allowed"
+        case (.off, _):      return Text("Sleep guard off")
+        case (.alwaysOn, _): return Text("Always awake")
+        case (_, true):      return Text("Keeping Mac awake")
+        default:             return Text("Sleep allowed")
         }
     }
 
     @ViewBuilder private var subtitle: some View {
-        if model.mode == .off {
+        if let finished = model.agentsFinishedAt {
+            let n = model.finishedSessions.count + model.finishedProcesses.count
+            (Text(n == 1 ? "Agent finished " : "Agents finished ") + Text(finished, style: .timer) + Text(" ago")).monospacedDigit()
+        } else if model.mode == .off {
             Text("Your Mac sleeps normally")
         } else if model.mode == .timed, let end = model.timerEnd {
             (Text(end, style: .timer) + Text(" left") + Text(agentsSuffix)).monospacedDigit()
@@ -92,6 +111,24 @@ private struct StatusHeader: View {
     private var agentsSuffix: String {
         let n = model.activeCount
         return n == 0 ? "" : " · \(n) agent\(n == 1 ? "" : "s")"
+    }
+}
+
+/// The wind-down's time left, running down clockwise from 12 o'clock around the status icon.
+private struct WindDownRing: View {
+    let level: Double
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.08), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: level)
+                .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 3), value: level)   // the model ticks every 3 s
+        }
+        .padding(-4)
     }
 }
 
@@ -231,41 +268,6 @@ private struct ModePicker: NSViewRepresentable {
     }
 }
 
-// MARK: - Connect card
-
-private struct ConnectCard: View {
-    @EnvironmentObject private var model: VigilModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.callout.weight(.semibold))
-            Text("Stay awake exactly while it works, not just while it's open.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 6) {
-                if !model.hooksInstalled {
-                    Button(missing.count > 1 ? "Connect Claude Code" : "Connect") { model.installHooks() }
-                }
-                if model.codexAvailable && !model.codexHooksInstalled {
-                    Button(missing.count > 1 ? "Connect Codex" : "Connect") { model.installCodexHooks() }
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.12)))
-    }
-
-    private var missing: [String] {
-        (model.hooksInstalled ? [] : ["Claude Code"]) + (model.codexAvailable && !model.codexHooksInstalled ? ["Codex"] : [])
-    }
-
-    private var title: String { "Connect " + missing.joined(separator: " and ") }
-}
-
 // MARK: - Activity
 
 private struct ActivitySection: View {
@@ -273,8 +275,15 @@ private struct ActivitySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionLabel(title: "Activity")
-            if model.sessions.isEmpty && model.processes.isEmpty {
+            HStack(spacing: 0) {
+                SectionLabel(title: "Activity")
+                Spacer(minLength: 8)
+                ConnectionStatus()
+            }
+            if model.isWindingDown {
+                ForEach(model.finishedSessions) { SessionRow(session: $0, finished: true) }
+                ForEach(model.finishedProcesses, id: \.self) { ProcessRow(name: $0, finished: true) }
+            } else if model.sessions.isEmpty && model.processes.isEmpty {
                 Label(model.mode == .automatic ? "No agents working" : "Detection paused", systemImage: "moon.stars")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -288,9 +297,46 @@ private struct ActivitySection: View {
     }
 }
 
+/// Which agents are connected, right above the sessions they report: logo, name and a green dot,
+/// or a gray logo with a Connect link. Codex only shows up once it's installed.
+private struct ConnectionStatus: View {
+    @EnvironmentObject private var model: VigilModel
+
+    var body: some View {
+        let codexMissing = model.codexAvailable && !model.codexHooksInstalled
+        let bothMissing = !model.hooksInstalled && codexMissing
+        HStack(spacing: 10) {
+            agent("Claude Code", codex: false, connected: model.hooksInstalled, short: bothMissing, connect: model.installHooks)
+            if model.codexHooksInstalled || model.codexAvailable {
+                agent("Codex", codex: true, connected: model.codexHooksInstalled, short: bothMissing, connect: model.installCodexHooks)
+            }
+        }
+        .font(.caption2)
+        .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private func agent(_ name: String, codex: Bool, connected: Bool, short: Bool, connect: @escaping () -> Void) -> some View {
+        HStack(spacing: 4) {
+            AgentIcon(codex: codex, size: 12, dimmed: !connected)
+            if connected {
+                Text(name).foregroundStyle(.secondary)
+                Circle().fill(Color.green).frame(width: 5, height: 5)
+            } else {
+                Button(short ? "Connect" : "Connect \(name)", action: connect)
+                    .buttonStyle(.link)
+            }
+        }
+        .help(connected
+              ? "\(name) connected: Vigil sees when it's working"
+              : "Connect \(name) so Vigil keeps the Mac awake exactly while it works")
+    }
+}
+
 private struct SessionRow: View {
     @EnvironmentObject private var model: VigilModel
     let session: SessionRecord
+    var finished = false
     @State private var hovering = false
 
     var body: some View {
@@ -307,7 +353,9 @@ private struct SessionRow: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            if hovering {
+            if finished {
+                DoneLabel()
+            } else if hovering {
                 Button { model.release(session.id) } label: {
                     Image(systemName: "xmark.circle.fill")
                 }
@@ -322,17 +370,33 @@ private struct SessionRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(hovering && !finished ? 0.08 : 0.04)))
+        .opacity(finished ? 0.5 : 1)
         .onHover { hovering = $0 }
     }
 
     private var isCodex: Bool { session.agent == "codex" }
 }
 
+/// "✓ Done" on a row that finished, shown during the wind-down.
+private struct DoneLabel: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark").foregroundStyle(.green)
+            Text("Done")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+}
+
 /// The agent's logo on a rounded tile, like a tiny app icon: Claude's starburst on orange,
 /// the OpenAI mark on white for Codex. Fixed colors, so it reads the same in light and dark.
 private struct AgentIcon: View {
     let codex: Bool
+    var size: CGFloat = 20
+    /// Gray and faded: the agent isn't connected.
+    var dimmed = false
 
     private static let claudeOrange = Color(red: 0xD9 / 255, green: 0x77 / 255, blue: 0x57 / 255)
     private static let claudeGlyph = glyph("claude")
@@ -346,24 +410,27 @@ private struct AgentIcon: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 5, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: size / 4, style: .continuous)
         shape
             .fill(codex ? Color.white : Self.claudeOrange)
             .overlay(shape.strokeBorder(Color.black.opacity(codex ? 0.12 : 0), lineWidth: 0.5))
             .overlay {
                 if let glyph = codex ? Self.openAIGlyph : Self.claudeGlyph {
-                    Image(nsImage: glyph).resizable().scaledToFit().padding(3)
+                    Image(nsImage: glyph).resizable().scaledToFit().padding(size * 0.15)
                 } else {
-                    Image(systemName: "sparkle").font(.system(size: 10, weight: .semibold))   // dev builds without Resources
+                    Image(systemName: "sparkle").font(.system(size: size / 2, weight: .semibold))   // dev builds without Resources
                 }
             }
             .foregroundStyle(codex ? Color.black : Color.white)
-            .frame(width: 20, height: 20)
+            .frame(width: size, height: size)
+            .grayscale(dimmed ? 1 : 0)
+            .opacity(dimmed ? 0.45 : 1)
     }
 }
 
 private struct ProcessRow: View {
     let name: String
+    var finished = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -372,14 +439,19 @@ private struct ProcessRow: View {
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 1) {
                 Text(name).font(.callout.weight(.medium)).lineLimit(1)
-                Text("Process running").font(.caption).foregroundStyle(.secondary)
+                Text(finished ? "Process ended" : "Process running").font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            Circle().fill(Color.green).frame(width: 7, height: 7)
+            if finished {
+                DoneLabel()
+            } else {
+                Circle().fill(Color.green).frame(width: 7, height: 7)
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+        .opacity(finished ? 0.5 : 1)
     }
 }
 
@@ -391,6 +463,18 @@ private struct SettingsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(title: "Settings")
+            HStack {
+                Text("Stay awake after agents finish").font(.callout)
+                Spacer()
+                Picker("Stay awake after agents finish", selection: $model.graceMinutes) {
+                    ForEach(VigilModel.graceOptions, id: \.self) { Text($0 == 0 ? "Off" : "\($0) min").tag($0) }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .fixedSize()
+            }
+            .help("In Auto, wait this long after the last agent finishes before letting the Mac sleep")
             SettingToggle(title: "Keep display on", isOn: $model.keepDisplayAwake)
             VStack(alignment: .leading, spacing: 2) {
                 SettingToggle(title: "Stay awake with lid closed", isOn: Binding(
@@ -401,7 +485,7 @@ private struct SettingsSection: View {
                     if let pause = model.lidPause {
                         Text(pause.reason).font(.caption).foregroundStyle(.orange)
                     } else {
-                        Text("Only while Vigil is keeping the Mac awake").font(.caption).foregroundStyle(.secondary)
+                        Text("Only while an agent works, or in Always and Timer").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -527,18 +611,12 @@ private struct Footer: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            if connected.isEmpty {
-                Label("Not connected", systemImage: "circle.dashed")
-                    .foregroundStyle(.secondary)
-            } else {
-                Label(connected.joined(separator: " + "), systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .lineLimit(1)
-                    .help(connected.joined(separator: " and ") + " connected")
+            HStack(spacing: 6) {
+                AppLogo()
+                Text("Vigil").font(.callout.weight(.semibold))
+                Text("v\(version)").foregroundStyle(.tertiary)
             }
             Spacer()
-            Text("v\(version)")
-                .foregroundStyle(.tertiary)
             Menu {
                 if model.hooksInstalled {
                     Button("Disconnect Claude Code") { model.removeHooks() }
@@ -572,12 +650,20 @@ private struct Footer: View {
         .font(.caption)
     }
 
-    private var connected: [String] {
-        (model.hooksInstalled ? ["Claude Code"] : []) + (model.codexHooksInstalled ? ["Codex"] : [])
-    }
-
     private var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
+}
+
+/// The app icon, cropped to its rounded square: macOS icons carry a transparent margin that
+/// would make it look smaller than the text beside it.
+private struct AppLogo: View {
+    var body: some View {
+        Image(nsImage: NSApp.applicationIconImage)
+            .resizable()
+            .frame(width: 17, height: 17)
+            .frame(width: 14, height: 14)
+            .clipShape(RoundedRectangle(cornerRadius: 3.5, style: .continuous))
     }
 }
 

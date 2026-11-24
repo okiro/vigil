@@ -33,6 +33,7 @@ Vigil sits in your menu bar and handles both. It keeps your Mac awake exactly as
 - **Your screen still locks.** Vigil keeps the Mac running but lets the display turn off and lock as usual. If you want the screen to stay on, turn on **Keep display on**.
 - **Close the lid, keep working.** Turn on **Stay awake with lid closed** and your laptop keeps going in your bag while an agent works, then sleeps as soon as it's done. The cup turns red so you know it's on.
 - **Timer.** Need the Mac awake for a download or a long build? Pick anything from 30 minutes to 8 hours. When time's up, Vigil goes back to normal.
+- **A few minutes' grace.** When your agents finish, Vigil keeps the Mac awake for 5 more minutes, so it doesn't fall asleep while you read the result and type your next prompt. The cup slowly empties as the time runs out. Pick anything from 1 to 15 minutes, or turn it off, under **Stay awake after agents finish**.
 - **Status at a glance.** The cup in your menu bar fills in while the Mac is kept awake. It also shows how many agents are working and how much time is left on a timer.
 - **Updates itself.** New versions install quietly in the background, never in the middle of an agent's run.
 - **Never touches your settings.** Vigil doesn't change your Mac's power settings, unless you turn on **Stay awake with lid closed**, and then only while an agent works. If Vigil quits, your Mac goes straight back to sleeping normally.
@@ -50,7 +51,7 @@ Vigil sits in your menu bar and handles both. It keeps your Mac awake exactly as
 
 1. **[Download Vigil](https://github.com/okiro/vigil/releases/latest/download/Vigil.dmg)**, open the `.dmg` and drag Vigil into **Applications**.
 2. Open Vigil. A cup appears in your menu bar.
-3. Click the cup and press **Connect** to link Claude Code (and **Connect Codex** if you use Codex). If either is already open, restart it so it picks up the change.
+3. Click the cup and press **Connect** next to **Activity** to link Claude Code (and Codex, if you use it). If either is already open, restart it so it picks up the change.
 
 That's it. Turn on **Launch at login** in the panel if you want Vigil to start every time you log in.
 
